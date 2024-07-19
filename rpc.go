@@ -5,10 +5,12 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -43,6 +45,13 @@ const (
 	GetTransactionCountByHash           RpcName = "eth_getTransactionCountByHash"
 	GetBlockTransactionCountByHash      RpcName = "eth_getBlockTransactionCountByHash"
 	GetCode                             RpcName = "eth_getCode"
+	GetStorageAt                        RpcName = "eth_getStorageAt"
+	NewFilter                           RpcName = "eth_newFilter"
+	GetFilterLogs                       RpcName = "eth_getFilterLogs"
+	NewBlockFilter                      RpcName = "eth_newBlockFilter"
+	GetFilterChanges                    RpcName = "eth_getFilterChanges"
+	UninstallFilter                     RpcName = "eth_uninstallFilter"
+	GetLogs                             RpcName = "eth_getLogs"
 )
 
 type Account struct {
@@ -60,7 +69,12 @@ type RpcContext struct {
 	ProcessedTransactions []common.Hash
 	BlockNumsIncludingTx  []uint64
 	AlreadyTestedRPCs     []*RpcResult
+	ERC20Abi              *abi.ABI
+	ERC20ByteCode         []byte
 	ERC20Addr             common.Address
+	FilterQuery           ethereum.FilterQuery
+	FilterId              string
+	BlockFilterId         string
 }
 
 func NewContext(conf *Config) (*RpcContext, error) {
@@ -411,8 +425,7 @@ func RpcSendRawTransactionTransferValue(rCtx *RpcContext) (*RpcResult, error) {
 		return nil, err
 	}
 
-	err = rCtx.EthCli.SendTransaction(context.Background(), signedTx)
-	if err != nil {
+	if err = rCtx.EthCli.SendTransaction(context.Background(), signedTx); err != nil {
 		return nil, err
 	}
 	result := &RpcResult{
@@ -499,8 +512,7 @@ func RpcSendRawTransactionDeployContract(rCtx *RpcContext) (*RpcResult, error) {
 		return nil, err
 	}
 
-	err = rCtx.EthCli.SendTransaction(context.Background(), signedTx)
-	if err != nil {
+	if err = rCtx.EthCli.SendTransaction(context.Background(), signedTx); err != nil {
 		return nil, err
 	}
 	result := &RpcResult{
@@ -523,7 +535,94 @@ func RpcSendRawTransactionDeployContract(rCtx *RpcContext) (*RpcResult, error) {
 	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, testedRPCs...)
 
 	return result, nil
+}
 
+func RpcSendRawTransactionTransferERC20(rCtx *RpcContext) (*RpcResult, error) {
+	// testedRPCs is a slice of RpcResult that will be appended to rCtx.AlreadyTestedRPCs
+	// if the transaction is successfully sent
+	var testedRPCs []*RpcResult
+	var err error
+	// Create a new transaction
+	if rCtx.ChainId, err = rCtx.EthCli.ChainID(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetChainId,
+		Status: Ok,
+		Value:  rCtx.ChainId.String(),
+	})
+
+	nonce, err := rCtx.EthCli.PendingNonceAt(context.Background(), rCtx.Acc.Address)
+	if err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetTransactionCount,
+		Status: Ok,
+		Value:  nonce,
+	})
+
+	if rCtx.MaxPriorityFeePerGas, err = rCtx.EthCli.SuggestGasTipCap(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetMaxPriorityFeePerGas,
+		Status: Ok,
+		Value:  rCtx.MaxPriorityFeePerGas.String(),
+	})
+	if rCtx.GasPrice, err = rCtx.EthCli.SuggestGasPrice(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetGasPrice,
+		Status: Ok,
+		Value:  rCtx.GasPrice.String(),
+	})
+
+	randomRecipient := MustCreateRandomAccount().Address
+	data, err := rCtx.ERC20Abi.Pack("transfer", randomRecipient, new(big.Int).SetUint64(1))
+	if err != nil {
+		log.Fatalf("Failed to pack transaction data: %v", err)
+	}
+
+	// Erc20 transfer
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   rCtx.ChainId,
+		Nonce:     nonce,
+		GasTipCap: rCtx.MaxPriorityFeePerGas,
+		GasFeeCap: new(big.Int).Add(rCtx.GasPrice, big.NewInt(1000000000)),
+		Gas:       10000000,
+		To:        &rCtx.ERC20Addr,
+		Data:      data,
+	})
+
+	// TODO: Make signer using types.MakeSigner with chain params
+	signer := types.NewLondonSigner(rCtx.ChainId)
+	signedTx, err := types.SignTx(tx, signer, rCtx.Acc.PrivKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = rCtx.EthCli.SendTransaction(context.Background(), signedTx); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: SendRawTransaction,
+		Status: Ok,
+		Value:  signedTx.Hash().Hex(),
+	}
+	testedRPCs = append(testedRPCs, result)
+
+	// wait for the transaction to be mined
+	tout, _ := time.ParseDuration(rCtx.Conf.Timeout)
+	if err = WaitForTx(rCtx, signedTx.Hash(), tout); err != nil {
+		return nil, err
+	}
+
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, testedRPCs...)
+
+	return result, nil
 }
 
 func RpcGetBlockReceipts(rCtx *RpcContext) (*RpcResult, error) {
@@ -746,6 +845,228 @@ func RpcGetCode(rCtx *RpcContext) (*RpcResult, error) {
 		Method: GetCode,
 		Status: Ok,
 		Value:  hexutils.BytesToHex(code),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetStorageAt(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetStorageAt); result != nil {
+		return result, nil
+	}
+
+	if rCtx.ERC20Addr == (common.Address{}) {
+		return nil, errors.New("no contract address, must be deployed first")
+	}
+
+	key := MustCalculateSlotKey(rCtx, 4)
+	storage, err := rCtx.EthCli.StorageAt(context.Background(), rCtx.ERC20Addr, key, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var warnings []string
+	status := Ok
+	// check storage is zero
+	if IsZeroBytes(storage) {
+		warnings = append(warnings, "storage is zero bytes, should try another slot")
+		status = Warning
+	}
+
+	result := &RpcResult{
+		Method:   GetStorageAt,
+		Status:   status,
+		Value:    hexutils.BytesToHex(storage),
+		Warnings: warnings,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcNewFilter(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(NewFilter); result != nil {
+		return result, nil
+	}
+
+	fErc20Transfer := ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(rCtx.BlockNumsIncludingTx[0] - 1),
+		Addresses: []common.Address{rCtx.ERC20Addr},
+		Topics: [][]common.Hash{
+			{rCtx.ERC20Abi.Events["Transfer"].ID}, // Filter for Transfer event
+		},
+	}
+	args, err := toFilterArg(fErc20Transfer)
+	if err != nil {
+		return nil, err
+	}
+	var rpcId string
+	if err = rCtx.EthCli.Client().CallContext(context.Background(), &rpcId, string(NewFilter), args); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: NewFilter,
+		Status: Ok,
+		Value:  rpcId,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+	rCtx.FilterId = rpcId
+	rCtx.FilterQuery = fErc20Transfer
+
+	return result, nil
+}
+
+func RpcGetFilterLogs(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetFilterLogs); result != nil {
+		return result, nil
+	}
+
+	if rCtx.FilterId == "" {
+		return nil, errors.New("no filter id, must create a filter first")
+	}
+
+	if _, err := RpcSendRawTransactionTransferERC20(rCtx); err != nil {
+		return nil, errors.New("transfer ERC20 must be succeeded before checking filter logs")
+	}
+
+	var logs []types.Log
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &logs, string(GetFilterLogs), rCtx.FilterId); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetFilterLogs,
+		Status: Ok,
+		Value:  MustBeautifyLogs(logs),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcNewBlockFilter(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(NewBlockFilter); result != nil {
+		return result, nil
+	}
+
+	var rpcId string
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &rpcId, string(NewBlockFilter)); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: NewBlockFilter,
+		Status: Ok,
+		Value:  rpcId,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+	rCtx.BlockFilterId = rpcId
+
+	return result, nil
+}
+
+func RpcGetFilterChanges(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetFilterChanges); result != nil {
+		return result, nil
+	}
+
+	if rCtx.BlockFilterId == "" {
+		return nil, errors.New("no block filter id, must create a block filter first")
+	}
+
+	// TODO: Make it configurable
+	time.Sleep(3 * time.Second) // wait for a new block to be mined
+
+	var changes []interface{}
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &changes, string(GetFilterChanges), rCtx.BlockFilterId); err != nil {
+		return nil, err
+	}
+
+	status := Ok
+	warnings := []string{}
+	if len(changes) == 0 {
+		status = Warning
+		warnings = append(warnings, "no new blocks")
+	}
+
+	result := &RpcResult{
+		Method:   GetFilterChanges,
+		Status:   status,
+		Value:    changes,
+		Warnings: warnings,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcUninstallFilter(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(UninstallFilter); result != nil {
+		return result, nil
+	}
+
+	if rCtx.FilterId == "" {
+		return nil, errors.New("no filter id, must create a filter first")
+	}
+
+	var res bool
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &res, string(UninstallFilter), rCtx.FilterId); err != nil {
+		return nil, err
+	}
+	if !res {
+		return nil, errors.New("uninstall filter failed")
+	}
+
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &res, string(UninstallFilter), rCtx.FilterId); err != nil {
+		return nil, err
+	}
+	if res {
+		return nil, errors.New("uninstall filter should be failed because it was already uninstalled")
+	}
+
+	result := &RpcResult{
+		Method: UninstallFilter,
+		Status: Ok,
+		Value:  rCtx.FilterId,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetLogs(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetLogs); result != nil {
+		return result, nil
+	}
+
+	if _, err := RpcNewFilter(rCtx); err != nil {
+		return nil, errors.New("failed to create a filter")
+	}
+
+	if _, err := RpcSendRawTransactionTransferERC20(rCtx); err != nil {
+		return nil, errors.New("transfer ERC20 must be succeeded before checking filter logs")
+	}
+
+	// set from block because of limit
+	logs, err := rCtx.EthCli.FilterLogs(context.Background(), rCtx.FilterQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	status := Ok
+	warnings := []string{}
+	if len(logs) == 0 {
+		status = Warning
+		warnings = append(warnings, "no logs")
+	}
+
+	result := &RpcResult{
+		Method:   GetLogs,
+		Status:   status,
+		Value:    MustBeautifyLogs(logs),
+		Warnings: warnings,
 	}
 	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
 

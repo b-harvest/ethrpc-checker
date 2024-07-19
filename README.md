@@ -42,4 +42,4 @@ $ cd /path/to/ethrpc-checker
 $ solc --bin --abi --evm-version london ERC20.sol -o .     
 ```
 
-Copy the value of `ERC20.bin` and to the ContractBytecode in `main.go`
+- When compile finished, change the slot index of the GetStorageAt if you have different storage variables.

@@ -3,6 +3,11 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Copy compiled contract bytecode
@@ -21,6 +26,8 @@ func main() {
 		log.Fatalf("Failed to create context: %v", err)
 	}
 
+	rCtx = MustLoadContractInfo(rCtx)
+
 	// Collect json rpc results
 	var results []*RpcResult
 
@@ -30,6 +37,7 @@ func main() {
 	}{
 		{SendRawTransaction, RpcSendRawTransactionTransferValue},
 		{SendRawTransaction, RpcSendRawTransactionDeployContract},
+		{SendRawTransaction, RpcSendRawTransactionTransferERC20},
 		{GetBlockNumber, RpcGetBlockNumber},
 		{GetGasPrice, RpcGetGasPrice},
 		{GetMaxPriorityFeePerGas, RpcGetMaxPriorityFeePerGas},
@@ -46,6 +54,13 @@ func main() {
 		{GetTransactionCountByHash, RpcGetTransactionCountByHash},
 		{GetBlockTransactionCountByHash, RpcGetBlockTransactionCountByHash},
 		{GetCode, RpcGetCode},
+		{GetStorageAt, RpcGetStorageAt},
+		{NewFilter, RpcNewFilter},
+		{GetFilterLogs, RpcGetFilterLogs},
+		{NewBlockFilter, RpcNewBlockFilter},
+		{GetFilterChanges, RpcGetFilterChanges},
+		{UninstallFilter, RpcUninstallFilter},
+		{GetLogs, RpcGetLogs},
 	}
 
 	for _, r := range rpcs {
@@ -63,4 +78,28 @@ func main() {
 	results = append(results, rCtx.AlreadyTestedRPCs...)
 
 	ReportResults(results, *verbose, *outputExcel)
+}
+
+func MustLoadContractInfo(rCtx *RpcContext) *RpcContext {
+	// Read the ABI file
+	abiFile, err := os.ReadFile("ERC20Token.abi")
+	if err != nil {
+		log.Fatalf("Failed to read ABI file: %v", err)
+	}
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(string(abiFile)))
+	if err != nil {
+		log.Fatalf("Failed to parse ERC20 ABI: %v", err)
+	}
+	rCtx.ERC20Abi = &parsedABI
+	// Read the compiled contract bytecode
+	bytecode, err := os.ReadFile("ERC20Token.bin")
+	if err != nil {
+		log.Fatalf("Failed to read contract bytecode: %v", err)
+	}
+	// Decode the hex string to bytes
+	contractBytecode := common.FromHex(string(bytecode))
+	rCtx.ERC20ByteCode = contractBytecode
+
+	return rCtx
 }
