@@ -51,3 +51,12 @@ func MustBeautifyReceipts(receipts types.Receipts) string {
 	}
 	return string(receiptsJSON)
 }
+
+// MustBeautifyTransaction formats and prints an Ethereum transaction in a readable JSON format
+func MustBeautifyTransaction(tx *types.Transaction) string {
+	txJSON, err := tx.MarshalJSON()
+	if err != nil {
+		log.Fatalf("Failed to marshal transaction: %v", err)
+	}
+	return string(txJSON)
+}

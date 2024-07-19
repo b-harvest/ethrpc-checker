@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/google/go-cmp/cmp"
+	"github.com/status-im/keycard-go/hexutils"
 )
 
 // GethVersion is the version of the Geth client used in the tests
@@ -59,6 +60,7 @@ type RpcContext struct {
 	ProcessedTransactions []common.Hash
 	BlockNumsIncludingTx  []uint64
 	AlreadyTestedRPCs     []*RpcResult
+	ERC20Addr             common.Address
 }
 
 func NewContext(conf *Config) (*RpcContext, error) {
@@ -334,11 +336,7 @@ func RpcGetBlockByNumber(rCtx *RpcContext) (*RpcResult, error) {
 	return result, nil
 }
 
-func RpcSendRawTransaction(rCtx *RpcContext) (*RpcResult, error) {
-	if result := rCtx.AlreadyTested(SendRawTransaction); result != nil {
-		return result, nil
-	}
-
+func RpcSendRawTransactionTransferValue(rCtx *RpcContext) (*RpcResult, error) {
 	// testedRPCs is a slice of RpcResult that will be appended to rCtx.AlreadyTestedRPCs
 	// if the transaction is successfully sent
 	var testedRPCs []*RpcResult
@@ -443,6 +441,91 @@ func RpcSendRawTransaction(rCtx *RpcContext) (*RpcResult, error) {
 	return result, nil
 }
 
+func RpcSendRawTransactionDeployContract(rCtx *RpcContext) (*RpcResult, error) {
+	// testedRPCs is a slice of RpcResult that will be appended to rCtx.AlreadyTestedRPCs
+	// if the transaction is successfully sent
+	var testedRPCs []*RpcResult
+	var err error
+	// Create a new transaction
+	if rCtx.ChainId, err = rCtx.EthCli.ChainID(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetChainId,
+		Status: Ok,
+		Value:  rCtx.ChainId.String(),
+	})
+
+	nonce, err := rCtx.EthCli.PendingNonceAt(context.Background(), rCtx.Acc.Address)
+	if err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetTransactionCount,
+		Status: Ok,
+		Value:  nonce,
+	})
+
+	if rCtx.MaxPriorityFeePerGas, err = rCtx.EthCli.SuggestGasTipCap(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetMaxPriorityFeePerGas,
+		Status: Ok,
+		Value:  rCtx.MaxPriorityFeePerGas.String(),
+	})
+	if rCtx.GasPrice, err = rCtx.EthCli.SuggestGasPrice(context.Background()); err != nil {
+		return nil, err
+	}
+	testedRPCs = append(testedRPCs, &RpcResult{
+		Method: GetGasPrice,
+		Status: Ok,
+		Value:  rCtx.GasPrice.String(),
+	})
+
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   rCtx.ChainId,
+		Nonce:     nonce,
+		GasTipCap: rCtx.MaxPriorityFeePerGas,
+		GasFeeCap: new(big.Int).Add(rCtx.GasPrice, big.NewInt(1000000000)),
+		Gas:       1000000000,
+		Data:      common.FromHex(ContractByteCode),
+	})
+
+	// TODO: Make signer using types.MakeSigner with chain params
+	signer := types.NewLondonSigner(rCtx.ChainId)
+	signedTx, err := types.SignTx(tx, signer, rCtx.Acc.PrivKey)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rCtx.EthCli.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		return nil, err
+	}
+	result := &RpcResult{
+		Method: SendRawTransaction,
+		Status: Ok,
+		Value:  signedTx.Hash().Hex(),
+	}
+	testedRPCs = append(testedRPCs, result)
+
+	// wait for the transaction to be mined
+	tout, _ := time.ParseDuration(rCtx.Conf.Timeout)
+	if err = WaitForTx(rCtx, signedTx.Hash(), tout); err != nil {
+		return nil, err
+	}
+
+	if rCtx.ERC20Addr == (common.Address{}) {
+		return nil, errors.New("contract address is empty, failed to deploy")
+	}
+
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, testedRPCs...)
+
+	return result, nil
+
+}
+
 func RpcGetBlockReceipts(rCtx *RpcContext) (*RpcResult, error) {
 	if result := rCtx.AlreadyTested(GetBlockReceipts); result != nil {
 		return result, nil
@@ -466,6 +549,203 @@ func RpcGetBlockReceipts(rCtx *RpcContext) (*RpcResult, error) {
 		Method: GetBlockReceipts,
 		Status: Ok,
 		Value:  MustBeautifyReceipts(receipts),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetTransactionByHash(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetTransactionByHash); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.ProcessedTransactions) == 0 {
+		return nil, errors.New("no transactions")
+	}
+
+	// TODO: Random pick
+	txHash := rCtx.ProcessedTransactions[0]
+	tx, _, err := rCtx.EthCli.TransactionByHash(context.Background(), txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetTransactionByHash,
+		Status: Ok,
+		Value:  MustBeautifyTransaction(tx),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetTransactionByBlockHashAndIndex(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetTransactionByBlockHashAndIndex); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.BlockNumsIncludingTx) == 0 {
+		return nil, errors.New("no blocks with transactions")
+	}
+
+	// TODO: Random pick
+	blkNum := rCtx.BlockNumsIncludingTx[0]
+	blk, err := rCtx.EthCli.BlockByNumber(context.Background(), new(big.Int).SetUint64(blkNum))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(blk.Transactions()) == 0 {
+		return nil, errors.New("no transactions in the block")
+	}
+
+	tx, err := rCtx.EthCli.TransactionInBlock(context.Background(), blk.Hash(), 0)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetTransactionByBlockHashAndIndex,
+		Status: Ok,
+		Value:  MustBeautifyTransaction(tx),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetTransactionByBlockNumberAndIndex(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetTransactionByBlockNumberAndIndex); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.BlockNumsIncludingTx) == 0 {
+		return nil, errors.New("no blocks with transactions")
+	}
+
+	// TODO: Random pick
+	blkNum := rCtx.BlockNumsIncludingTx[0]
+	var tx types.Transaction
+	if err := rCtx.EthCli.Client().CallContext(context.Background(), &tx, string(GetTransactionByBlockNumberAndIndex), blkNum, "0x0"); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetTransactionByBlockNumberAndIndex,
+		Status: Ok,
+		Value:  MustBeautifyTransaction(&tx),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetTransactionCountByHash(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetTransactionCountByHash); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.BlockNumsIncludingTx) == 0 {
+		return nil, errors.New("no transactions")
+	}
+
+	// get block
+	blkNum := rCtx.BlockNumsIncludingTx[0]
+	blk, err := rCtx.EthCli.BlockByNumber(context.Background(), new(big.Int).SetUint64(blkNum))
+	if err != nil {
+		return nil, err
+	}
+
+	var count uint64
+	if err = rCtx.EthCli.Client().CallContext(context.Background(), &count, string(GetTransactionCountByHash), blk.Hash()); err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetTransactionCountByHash,
+		Status: Ok,
+		Value:  count,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetTransactionReceipt(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetTransactionReceipt); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.ProcessedTransactions) == 0 {
+		return nil, errors.New("no transactions")
+	}
+
+	txHash := rCtx.ProcessedTransactions[0]
+	receipt, err := rCtx.EthCli.TransactionReceipt(context.Background(), txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetTransactionReceipt,
+		Status: Ok,
+		Value:  MustBeautifyReceipt(receipt),
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetBlockTransactionCountByHash(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetBlockTransactionCountByHash); result != nil {
+		return result, nil
+	}
+
+	if len(rCtx.BlockNumsIncludingTx) == 0 {
+		return nil, errors.New("no blocks with transactions")
+	}
+
+	blkNum := rCtx.BlockNumsIncludingTx[0]
+	blk, err := rCtx.EthCli.BlockByNumber(context.Background(), new(big.Int).SetUint64(blkNum))
+	if err != nil {
+		return nil, err
+	}
+
+	count, err := rCtx.EthCli.TransactionCount(context.Background(), blk.Hash())
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetBlockTransactionCountByHash,
+		Status: Ok,
+		Value:  count,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcGetCode(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(GetCode); result != nil {
+		return result, nil
+	}
+
+	if rCtx.ERC20Addr == (common.Address{}) {
+		return nil, errors.New("no contract address, must be deployed first")
+	}
+
+	code, err := rCtx.EthCli.CodeAt(context.Background(), rCtx.ERC20Addr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: GetCode,
+		Status: Ok,
+		Value:  hexutils.BytesToHex(code),
 	}
 	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
 
@@ -496,6 +776,12 @@ func WaitForTx(rCtx *RpcContext, txHash common.Hash, timeout time.Duration) erro
 					Status: Ok,
 					Value:  MustBeautifyReceipt(receipt),
 				})
+				if receipt.ContractAddress != (common.Address{}) {
+					rCtx.ERC20Addr = receipt.ContractAddress
+				}
+				if receipt.Status == 0 {
+					return fmt.Errorf("transaction %s failed", txHash.Hex())
+				}
 				return nil
 			}
 		}

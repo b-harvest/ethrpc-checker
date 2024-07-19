@@ -6,6 +6,8 @@ require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/fatih/color v1.16.0
 	github.com/google/go-cmp v0.5.8
+	github.com/status-im/keycard-go v0.2.0
+	github.com/xuri/excelize/v2 v2.8.1
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -31,11 +33,9 @@ require (
 	github.com/richardlehane/msoleps v1.0.3 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/supranational/blst v0.3.11 // indirect
-	github.com/tealeg/xlsx v1.0.5 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/xuri/efp v0.0.0-20231025114914-d1ff6096ae53 // indirect
-	github.com/xuri/excelize/v2 v2.8.1 // indirect
 	github.com/xuri/nfp v0.0.0-20230919160717-d98342af3f05 // indirect
 	golang.org/x/crypto v0.22.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
