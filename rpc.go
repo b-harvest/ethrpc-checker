@@ -25,7 +25,7 @@ import (
 const GethVersion = "1.14.7"
 
 type RpcName string
-type RpcCall func(rCtx *RpcContext) (*RpcResult, error)
+type CallRPC func(rCtx *RpcContext) (*RpcResult, error)
 
 const (
 	SendRawTransaction                  RpcName = "eth_sendRawTransaction"
@@ -52,6 +52,8 @@ const (
 	GetFilterChanges                    RpcName = "eth_getFilterChanges"
 	UninstallFilter                     RpcName = "eth_uninstallFilter"
 	GetLogs                             RpcName = "eth_getLogs"
+	EstimateGas                         RpcName = "eth_estimateGas"
+	Call                                RpcName = "eth_call"
 )
 
 type Account struct {
@@ -501,7 +503,7 @@ func RpcSendRawTransactionDeployContract(rCtx *RpcContext) (*RpcResult, error) {
 		Nonce:     nonce,
 		GasTipCap: rCtx.MaxPriorityFeePerGas,
 		GasFeeCap: new(big.Int).Add(rCtx.GasPrice, big.NewInt(1000000000)),
-		Gas:       1000000000,
+		Gas:       10000000,
 		Data:      common.FromHex(ContractByteCode),
 	})
 
@@ -1067,6 +1069,73 @@ func RpcGetLogs(rCtx *RpcContext) (*RpcResult, error) {
 		Status:   status,
 		Value:    MustBeautifyLogs(logs),
 		Warnings: warnings,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RpcEstimateGas(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(EstimateGas); result != nil {
+		return result, nil
+	}
+
+	if rCtx.ERC20Addr == (common.Address{}) {
+		return nil, errors.New("no contract address, must be deployed first")
+	}
+
+	data, err := rCtx.ERC20Abi.Pack("transfer", rCtx.Acc.Address, new(big.Int).SetUint64(1))
+	if err != nil {
+		log.Fatalf("Failed to pack transaction data: %v", err)
+	}
+
+	msg := ethereum.CallMsg{
+		From: rCtx.Acc.Address,
+		To:   &rCtx.ERC20Addr,
+		Data: data,
+	}
+	gas, err := rCtx.EthCli.EstimateGas(context.Background(), msg)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: EstimateGas,
+		Status: Ok,
+		Value:  gas,
+	}
+	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
+
+	return result, nil
+}
+
+func RPCCall(rCtx *RpcContext) (*RpcResult, error) {
+	if result := rCtx.AlreadyTested(Call); result != nil {
+		return result, nil
+	}
+
+	if rCtx.ERC20Addr == (common.Address{}) {
+		return nil, errors.New("no contract address, must be deployed first")
+	}
+
+	data, err := rCtx.ERC20Abi.Pack("balanceOf", rCtx.Acc.Address)
+	if err != nil {
+		log.Fatalf("Failed to pack transaction data: %v", err)
+	}
+
+	msg := ethereum.CallMsg{
+		To:   &rCtx.ERC20Addr,
+		Data: data,
+	}
+	res, err := rCtx.EthCli.CallContract(context.Background(), msg, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RpcResult{
+		Method: Call,
+		Status: Ok,
+		Value:  hexutils.BytesToHex(res),
 	}
 	rCtx.AlreadyTestedRPCs = append(rCtx.AlreadyTestedRPCs, result)
 

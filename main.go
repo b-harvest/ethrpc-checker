@@ -33,7 +33,7 @@ func main() {
 
 	rpcs := []struct {
 		name RpcName
-		test RpcCall
+		test CallRPC
 	}{
 		{SendRawTransaction, RpcSendRawTransactionTransferValue},
 		{SendRawTransaction, RpcSendRawTransactionDeployContract},
@@ -61,6 +61,8 @@ func main() {
 		{GetFilterChanges, RpcGetFilterChanges},
 		{UninstallFilter, RpcUninstallFilter},
 		{GetLogs, RpcGetLogs},
+		{EstimateGas, RpcEstimateGas},
+		{Call, RPCCall},
 	}
 
 	for _, r := range rpcs {

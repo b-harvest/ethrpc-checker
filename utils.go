@@ -62,11 +62,25 @@ func MustBeautifyReceipts(receipts types.Receipts) string {
 
 // MustBeautifyTransaction formats and prints an Ethereum transaction in a readable JSON format
 func MustBeautifyTransaction(tx *types.Transaction) string {
+	// First, use the default MarshalJSON to get the serialized data
 	txJSON, err := tx.MarshalJSON()
 	if err != nil {
 		log.Fatalf("Failed to marshal transaction: %v", err)
 	}
-	return string(txJSON)
+
+	// Then, unmarshal the serialized data into a map
+	var txMap map[string]interface{}
+	if err := json.Unmarshal(txJSON, &txMap); err != nil {
+		log.Fatalf("Failed to unmarshal transaction: %v", err)
+	}
+
+	// Finally, marshal the map with indentation
+	indentedTxJSON, err := json.MarshalIndent(txMap, "", "  ")
+	if err != nil {
+		log.Fatalf("Failed to marshal indented transaction: %v", err)
+	}
+
+	return string(indentedTxJSON)
 }
 
 func MustCalculateSlotKey(rCtx *RpcContext, slotIndex uint64) common.Hash {
