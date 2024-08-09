@@ -1,4 +1,4 @@
-package main
+package types
 
 type RpcStatus string
 
@@ -7,6 +7,8 @@ const (
 	Error   RpcStatus = "error"
 	Warning RpcStatus = "warning"
 )
+
+type RpcName string
 
 type RpcResult struct {
 	Method   RpcName

@@ -1,4 +1,4 @@
-package main
+package report
 
 import (
 	"encoding/json"
@@ -8,13 +8,17 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/xuri/excelize/v2"
+
+	"github.com/b-harvest/ethrpc-checker/rpc"
+	"github.com/b-harvest/ethrpc-checker/types"
+	"github.com/b-harvest/ethrpc-checker/utils"
 )
 
 // ReportResults prints or saves the RPC results based on the verbosity flag and output format
-func ReportResults(results []*RpcResult, verbose bool, outputExcel bool) {
+func ReportResults(results []*types.RpcResult, verbose bool, outputExcel bool) {
 	if outputExcel {
 		f := excelize.NewFile()
-		name := fmt.Sprintf("geth%s", GethVersion)
+		name := fmt.Sprintf("geth%s", rpc.GethVersion)
 		if err := f.SetSheetName("Sheet1", name); err != nil {
 			log.Fatalf("Failed to set sheet name: %v", err)
 		}
@@ -92,8 +96,8 @@ func ReportResults(results []*RpcResult, verbose bool, outputExcel bool) {
 			// SET STYLES
 			// set status column style based on status
 			switch result.Status {
-			case Ok:
-				fontStyle.Font.Color = GREEN
+			case types.Ok:
+				fontStyle.Font.Color = utils.GREEN
 				s, err := f.NewStyle(fontStyle)
 				if err != nil {
 					log.Fatalf("Failed to create style: %v", err)
@@ -101,8 +105,8 @@ func ReportResults(results []*RpcResult, verbose bool, outputExcel bool) {
 				if err = f.SetCellStyle(name, statusCell, statusCell, s); err != nil {
 					log.Fatalf("Failed to set cell style: %v", err)
 				}
-			case Warning:
-				fontStyle.Font.Color = YELLOW
+			case types.Warning:
+				fontStyle.Font.Color = utils.YELLOW
 				s, err := f.NewStyle(fontStyle)
 				if err != nil {
 					log.Fatalf("Failed to create style: %v", err)
@@ -110,8 +114,8 @@ func ReportResults(results []*RpcResult, verbose bool, outputExcel bool) {
 				if err = f.SetCellStyle(name, statusCell, statusCell, s); err != nil {
 					log.Fatalf("Failed to set cell style: %v", err)
 				}
-			case Error:
-				fontStyle.Font.Color = RED
+			case types.Error:
+				fontStyle.Font.Color = utils.RED
 				s, err := f.NewStyle(fontStyle)
 				if err != nil {
 					log.Fatalf("Failed to create style: %v", err)
@@ -158,19 +162,19 @@ func ReportResults(results []*RpcResult, verbose bool, outputExcel bool) {
 	}
 }
 
-func ColorPrint(result *RpcResult, verbose bool) {
+func ColorPrint(result *types.RpcResult, verbose bool) {
 	method := result.Method
 	status := result.Status
 	switch status {
-	case Ok:
+	case types.Ok:
 		value := result.Value
 		if !verbose {
 			value = ""
 		}
 		color.Green("%-40s: %s (value: %v)", method, status, value)
-	case Warning:
+	case types.Warning:
 		color.Yellow("%-40s: %s (%v)", method, status, result.Warnings)
-	case Error:
+	case types.Error:
 		color.Red("%-40s: %s (%v)", method, status, result.ErrMsg)
 	}
 }

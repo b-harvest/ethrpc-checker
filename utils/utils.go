@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"encoding/json"
@@ -11,9 +11,11 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	"github.com/b-harvest/ethrpc-checker/types"
 )
 
 const (
@@ -22,9 +24,10 @@ const (
 	GREEN  = "#00FF00"
 )
 
-func MustCreateRandomAccount() Account {
+// MustCreateRandomAccount creates a new Ethereum account with a random private key
+func MustCreateRandomAccount() types.Account {
 	// Create a new account
-	acc := Account{}
+	acc := types.Account{}
 	var err error
 	if acc.PrivKey, err = crypto.GenerateKey(); err != nil {
 		log.Fatal(err)
@@ -34,7 +37,7 @@ func MustCreateRandomAccount() Account {
 }
 
 // MustBeautifyBlock formats and prints an Ethereum block in a readable JSON format
-func MustBeautifyBlock(block *RpcBlock) string {
+func MustBeautifyBlock(block *types.RpcBlock) string {
 	blockJSON, err := json.MarshalIndent(block, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal block: %v", err)
@@ -43,7 +46,7 @@ func MustBeautifyBlock(block *RpcBlock) string {
 }
 
 // MustBeautifyReceipt formats and prints an Ethereum receipt in a readable JSON format
-func MustBeautifyReceipt(receipt *types.Receipt) string {
+func MustBeautifyReceipt(receipt *gethtypes.Receipt) string {
 	receiptJSON, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal receipt: %v", err)
@@ -52,7 +55,7 @@ func MustBeautifyReceipt(receipt *types.Receipt) string {
 }
 
 // MustBeautifyReceipts formats and prints a list of Ethereum receipts in a readable JSON format
-func MustBeautifyReceipts(receipts types.Receipts) string {
+func MustBeautifyReceipts(receipts gethtypes.Receipts) string {
 	receiptsJSON, err := json.MarshalIndent(receipts, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal receipts: %v", err)
@@ -61,7 +64,7 @@ func MustBeautifyReceipts(receipts types.Receipts) string {
 }
 
 // MustBeautifyTransaction formats and prints an Ethereum transaction in a readable JSON format
-func MustBeautifyTransaction(tx *types.Transaction) string {
+func MustBeautifyTransaction(tx *gethtypes.Transaction) string {
 	// First, use the default MarshalJSON to get the serialized data
 	txJSON, err := tx.MarshalJSON()
 	if err != nil {
@@ -83,7 +86,7 @@ func MustBeautifyTransaction(tx *types.Transaction) string {
 	return string(indentedTxJSON)
 }
 
-func MustCalculateSlotKey(rCtx *RpcContext, slotIndex uint64) common.Hash {
+func MustCalculateSlotKey(addr common.Address, slotIndex uint64) common.Hash {
 	addressTy, err := abi.NewType("address", "", nil)
 	if err != nil {
 		log.Fatalf("Failed to create address type: %v", err)
@@ -93,7 +96,7 @@ func MustCalculateSlotKey(rCtx *RpcContext, slotIndex uint64) common.Hash {
 	packedArgs, err := abi.Arguments{
 		{Type: addressTy},
 		{Type: uint256Ty},
-	}.Pack(rCtx.Acc.Address, slotIndexBig)
+	}.Pack(addr, slotIndexBig)
 	if err != nil {
 		log.Fatalf("Failed to pack arguments: %v", err)
 	}
@@ -101,7 +104,7 @@ func MustCalculateSlotKey(rCtx *RpcContext, slotIndex uint64) common.Hash {
 	return crypto.Keccak256Hash(packedArgs)
 }
 
-// isZeroBytes checks if a byte slice consists only of zero bytes
+// IsZeroBytes checks if a byte slice consists only of zero bytes
 func IsZeroBytes(b []byte) bool {
 	for _, v := range b {
 		if v != 0 {
@@ -111,7 +114,7 @@ func IsZeroBytes(b []byte) bool {
 	return true
 }
 
-func MustBeautifyLogs(logs []types.Log) string {
+func MustBeautifyLogs(logs []gethtypes.Log) string {
 	receiptsJSON, err := json.MarshalIndent(logs, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal receipts: %v", err)
@@ -119,17 +122,7 @@ func MustBeautifyLogs(logs []types.Log) string {
 	return string(receiptsJSON)
 }
 
-// MustBeautifyLog returns a formatted string representing the details of an Ethereum log
-func MustBeautifyLog(l types.Log) string {
-	jsonData, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
-		log.Fatalf("Failed to marshal log to JSON: %v", err)
-	}
-
-	return string(jsonData)
-}
-
-func toFilterArg(q ethereum.FilterQuery) (interface{}, error) {
+func ToFilterArg(q ethereum.FilterQuery) (interface{}, error) {
 	arg := map[string]interface{}{
 		"address": q.Addresses,
 		"topics":  q.Topics,

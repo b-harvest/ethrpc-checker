@@ -23,7 +23,7 @@ $ ./ethrpc-checker -v -xlsx
 ```yaml
 rpc_endpoint: "http://localhost:8545"
 # rich_privkey: private key of the account that has enough balance to send transactions
-rich_privkey: "b9d15599650f41dc705d1edf676830117d14bf41f7a06dac5d13228507cff77f"
+rich_privkey: "b9d15599650f41dc705d1edf676830117d14bf41f7a06dac5d13228507cff77f" # addr: 0xb14A5cF6D0F5a3B133d3cd3F396f756E091b8f65
 # timeout is a hard dead line for the transaction to be mined. 
 # if tx is not mined within this time, it will be considered as failed
 timeout: "10s"
@@ -38,7 +38,7 @@ $ brew update
 $ brew upgrade
 $ brew tap ethereum/ethereum
 $ brew install solidity
-$ cd /path/to/ethrpc-checker
+$ cd /path/to/ethrpc-checker/contracts
 $ solc --bin --abi --evm-version london ERC20.sol -o .     
 ```
 
